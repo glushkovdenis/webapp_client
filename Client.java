@@ -1,13 +1,14 @@
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
+import com.console.User.*;
 
 import java.io.*;
 import java.net.*;
 import java.text.SimpleDateFormat;
 import java.util.*;
 
-public class Client {
+public class Client implements Runnable{
     private static final String SERVER_ADDRESS = "127.0.0.1";
     private static final int PORT = 7676;
     private static final ObjectMapper mapper = new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT);
@@ -15,10 +16,9 @@ public class Client {
     private final static Scanner s = new Scanner(System.in);
 
     public Client(){
-        try (
-                Socket socket = new Socket(SERVER_ADDRESS, PORT);
-                DataInputStream input = new DataInputStream(socket.getInputStream());
-                DataOutputStream output = new DataOutputStream(socket.getOutputStream())
+        try (Socket socket = new Socket(SERVER_ADDRESS, PORT);
+             DataInputStream input = new DataInputStream(socket.getInputStream());
+             DataOutputStream output = new DataOutputStream(socket.getOutputStream())
         ) {
             mainMenu(input, output);
         } catch (IOException e) {
@@ -26,22 +26,33 @@ public class Client {
         }
     }
 
+    public void configs() {
+
+    }
+
     public void mainMenu(DataInputStream input, DataOutputStream output) throws IOException {
-        while (true) {
+        while(true) {
+            try {
             System.out.print("\n" + "Найти(1), добавить(2), удалить(3) данные или выйти(4)? ");
             int n = s.nextInt();
             switch (n) {
-                case(1):
+                case (1):
                     searchData(input, output);
                     break;
-                case(2):
+                case (2):
                     howToInputData(input, output);
                     break;
-                case(3):
+                case (3):
                     deleteUser(input, output);
                     break;
-                case(4):
-                    return;
+                case (4):
+                    System.exit(0);
+                default:
+                    System.out.println("\n" + "Команда не распознана. Повторте попытку!");
+                }
+            } catch (InputMismatchException e) {
+                System.out.println("Команда не распознана. Повторте попытку!");
+                s.next();
             }
         }
     }
@@ -54,8 +65,10 @@ public class Client {
         output.writeUTF(substring);
 
         String sInput = input.readUTF();
-        if(sInput == null || sInput.isEmpty()) {
-            System.out.println("Ошибка на сервере. Попробуйте позже!");
+        if(sInput.equals("0")) {
+            System.out.println("\n" + "Ошибка на сервере. Попробуйте позже!");
+        } else if (sInput.equals("00")) {
+            System.out.println("В базе данных нет записей!");
         } else {
             ArrayList<User> res = catchDamagedData(sInput);
             for(User u : res) {
@@ -99,11 +112,10 @@ public class Client {
     public void howToInputData(DataInputStream input, DataOutputStream output) throws IOException {
         User user;
         user = manualInput();
-        System.out.println(printData(user));
 
         output.writeInt(2);
         output.writeUTF(mapper.writeValueAsString(user));
-        System.out.println(input.readUTF());
+        System.out.println("\n" + input.readUTF());
     }
 
     public User manualInput() {
@@ -150,22 +162,46 @@ public class Client {
     public void deleteUser(DataInputStream input, DataOutputStream output) throws IOException {
         output.writeInt(3);
         String array = input.readUTF();
+        if(array.equals("0")) {
+            System.out.println("\n" + "Ошибка на сервере. Повторите попытку позже");
+            return;
+        } else if (array.equals("00")) {
+            System.out.println("\n" + "Записей в базе данных не обнаружено.");
+            return;
+        }
         ArrayList<User> userArray = new ArrayList<>(Arrays.asList(mapper.readValue(array, User[].class)));
         for(User u: userArray) {
             System.out.println(printData(u));
         }
 
         while (true) {
-            System.out.print("Введите id: ");
-            int id = s.nextInt();
-            if(userArray.removeIf(user -> user.getId() == id)) {
+            int id = 0;
+            while(true) {
+                System.out.print("Введите id: ");
+                try {
+                    id = s.nextInt();
+                    break;
+                } catch (Exception e) {
+                    System.out.println("Неверный формат ввода. Попробуйте снова.");
+                    s.next();
+                }
+            }
+            final int finalId = id;
+            if(userArray.removeIf(user -> user.getId() == finalId)) {
                 output.write(id);
                 break;
             } else {
                 System.out.println("Несуществующий id. Попробуйте ещё раз!");
             }
         }
+
         System.out.println("Обновлённый список данных: " + input.readUTF());
     }
 
+    @Override
+    public void run() {
+        while (true) {
+            new Client();
+        }
+    }
 }
