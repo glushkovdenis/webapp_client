@@ -1,3 +1,4 @@
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
@@ -7,30 +8,122 @@ import java.io.*;
 import java.net.*;
 import java.text.SimpleDateFormat;
 import java.util.*;
+import java.util.regex.*;
 
-public class Client implements Runnable{
-    private static final String SERVER_ADDRESS = "127.0.0.1";
-    private static final int PORT = 7676;
+public class Client {
+    private static String IP = "";
+    private static int PORT = 7676;
+    private static final String CONFIG_PATH = "C:\\projects\\console_client\\config_file\\config.json";
     private static final ObjectMapper mapper = new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT);
     private static final SimpleDateFormat df = new SimpleDateFormat("dd.MM.yyyy");
     private final static Scanner s = new Scanner(System.in);
+    private final static Pattern ipPattern = Pattern.compile(
+            "^(([01]?\\d\\d?|2[0-4]\\d|25[0-5])\\.){3}([01]?\\d\\d?|2[0-4]\\d|25[0-5])$");
+    private final static Pattern portPattern = Pattern.compile(
+            "^([0-9]{1,4}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])$");
 
     public Client(){
-        try (Socket socket = new Socket(SERVER_ADDRESS, PORT);
-             DataInputStream input = new DataInputStream(socket.getInputStream());
-             DataOutputStream output = new DataOutputStream(socket.getOutputStream())
-        ) {
-            mainMenu(input, output);
+        configs();
+        try {
+            Socket socket = new Socket(IP, PORT);
+            DataInputStream input = new DataInputStream(socket.getInputStream());
+            DataOutputStream output = new DataOutputStream(socket.getOutputStream());
+
+            boolean exit = mainMenu(input, output);
+
+            if(exit) {
+                socket.close();
+                input.close();
+                output.close();
+            }
         } catch (IOException e) {
             System.out.println(e.getMessage());
         }
     }
 
     public void configs() {
+        Map<String, String> configs = new HashMap<>();
+        while (true) {
+            try {
+                configs = mapper.readValue(
+                        new File(CONFIG_PATH), new TypeReference<Map<String, String>>(){});
+                break;
+            } catch (Exception e) {
+                System.out.println("Файл конфига повреждён или не найден. Задайте настройки вручную.");
+                createConfigs();
+            }
+        }
 
+        applyingConfigs(configs);
+
+        System.out.println(IP);
+        System.out.println(PORT);
     }
 
-    public void mainMenu(DataInputStream input, DataOutputStream output) throws IOException {
+    public void createConfigs() {
+        String ip = validateIP();
+        String port = validatePort();
+        Map<String, String> map = new HashMap<>();
+        map.put("PORT", port);
+        map.put("IP", ip);
+        try {
+            FileWriter writer = new FileWriter(CONFIG_PATH);
+            writer.write(mapper.writerWithDefaultPrettyPrinter().writeValueAsString(map));
+            writer.close();
+        } catch (IOException e) {
+            e.getMessage();
+        }
+    }
+
+    public String validateIP () {
+        String ip = "";
+        while(true) {
+            System.out.print("Введите ip: ");
+            ip = s.next();
+            if(ipPattern.matcher(ip).matches()) {
+                break;
+            } else {
+                System.out.println("Неверный формат IP-адресса. Попробуйте ещё!");
+            }
+        }
+        return ip;
+    }
+
+    public String validatePort () {
+        String port = "";
+        while(true) {
+            System.out.print("Введите port: ");
+            port = s.next();
+            if(portPattern.matcher(port).matches()) {
+                break;
+            } else {
+                System.out.println("Неверный формат PORT. Попробуйте ещё!");
+            }
+        }
+        return port;
+    }
+
+    public void applyingConfigs(Map<String, String> configs) {
+        for(Map.Entry<String, String> e : configs.entrySet()) {
+            if (e.getKey().equals("PORT")) {
+                if(portPattern.matcher(e.getValue()).matches()) {
+                    PORT = Integer.parseInt(e.getValue());
+                } else {
+                    PORT = Integer.parseInt(validatePort());
+                }
+            } else if(e.getKey().equals("IP")) {
+                if(ipPattern.matcher(e.getValue()).matches()) {
+                    IP = e.getValue();
+                } else {
+                    IP = validateIP();
+                }
+            } else {
+                System.out.println("Данные повреждены");
+            }
+        }
+    }
+
+    public boolean mainMenu(DataInputStream input, DataOutputStream output) throws IOException {
         while(true) {
             try {
             System.out.print("\n" + "Найти(1), добавить(2), удалить(3) данные или выйти(4)? ");
@@ -46,7 +139,8 @@ public class Client implements Runnable{
                     deleteUser(input, output);
                     break;
                 case (4):
-                    System.exit(0);
+                    output.writeInt(4);
+                    return true;
                 default:
                     System.out.println("\n" + "Команда не распознана. Повторте попытку!");
                 }
@@ -196,12 +290,5 @@ public class Client implements Runnable{
         }
 
         System.out.println("Обновлённый список данных: " + input.readUTF());
-    }
-
-    @Override
-    public void run() {
-        while (true) {
-            new Client();
-        }
     }
 }
