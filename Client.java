@@ -2,7 +2,16 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
-import com.console.User.*;
+import com.consolelibs.*;
+import org.apache.http.HttpResponse;
+import org.apache.http.client.HttpClient;
+import org.apache.http.client.methods.HttpDelete;
+import org.apache.http.client.methods.HttpGet;
+import org.apache.http.client.methods.HttpPost;
+import org.apache.http.entity.StringEntity;
+import org.apache.http.impl.client.CloseableHttpClient;
+import org.apache.http.impl.client.DefaultHttpClient;
+import org.apache.http.impl.client.HttpClients;
 
 import java.io.*;
 import java.net.*;
@@ -10,10 +19,10 @@ import java.text.SimpleDateFormat;
 import java.util.*;
 import java.util.regex.*;
 
+//C:/Users/denis.glushkov/Desktop/config.json
 public class Client {
     private static String IP = "";
-    private static int PORT = 7676;
-    private static final String CONFIG_PATH = "C:\\projects\\console_client\\config_file\\config.json";
+    private static int PORT = 5182;
     private static final ObjectMapper mapper = new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT);
     private static final SimpleDateFormat df = new SimpleDateFormat("dd.MM.yyyy");
     private final static Scanner s = new Scanner(System.in);
@@ -22,35 +31,45 @@ public class Client {
     private final static Pattern portPattern = Pattern.compile(
             "^([0-9]{1,4}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])$");
 
-    public Client(){
-        configs();
+    public Client(String[] args){
+        String CONFIG_PATH = argsToString(args);
+        configs(CONFIG_PATH);
         try {
-            Socket socket = new Socket(IP, PORT);
-            DataInputStream input = new DataInputStream(socket.getInputStream());
-            DataOutputStream output = new DataOutputStream(socket.getOutputStream());
+            CloseableHttpClient client = HttpClients.createDefault();
 
-            boolean exit = mainMenu(input, output);
+            boolean exit = mainMenu(client);
 
             if(exit) {
-                socket.close();
-                input.close();
-                output.close();
+                client.close();
             }
         } catch (IOException e) {
             System.out.println(e.getMessage());
         }
     }
 
-    public void configs() {
+    public String argsToString(String[] args) {
+        StringBuilder sb = new StringBuilder();
+        for(String s : args) {
+            sb.append(s);
+        }
+        return sb.toString();
+    }
+
+    public void configs(String CONFIG_PATH) {
         Map<String, String> configs = new HashMap<>();
         while (true) {
             try {
                 configs = mapper.readValue(
                         new File(CONFIG_PATH), new TypeReference<Map<String, String>>(){});
-                break;
+                if(validateConfigs(configs)) {
+                    break;
+                } else {
+                    System.out.println("Данные файла повреждены. Будет создан новый файл.");
+                    createConfigs(CONFIG_PATH);
+                }
             } catch (Exception e) {
                 System.out.println("Файл конфига повреждён или не найден. Задайте настройки вручную.");
-                createConfigs();
+                createConfigs(CONFIG_PATH);
             }
         }
 
@@ -60,7 +79,7 @@ public class Client {
         System.out.println(PORT);
     }
 
-    public void createConfigs() {
+    public void createConfigs(String CONFIG_PATH) {
         String ip = validateIP();
         String port = validatePort();
         Map<String, String> map = new HashMap<>();
@@ -75,7 +94,7 @@ public class Client {
         }
     }
 
-    public String validateIP () {
+    public String validateIP() {
         String ip = "";
         while(true) {
             System.out.print("Введите ip: ");
@@ -89,7 +108,7 @@ public class Client {
         return ip;
     }
 
-    public String validatePort () {
+    public String validatePort() {
         String port = "";
         while(true) {
             System.out.print("Введите port: ");
@@ -103,43 +122,55 @@ public class Client {
         return port;
     }
 
-    public void applyingConfigs(Map<String, String> configs) {
+    public boolean validateConfigs(Map<String, String> configs) {
+        boolean ok = false;
+        boolean port = false;
+        boolean ip = false;
         for(Map.Entry<String, String> e : configs.entrySet()) {
             if (e.getKey().equals("PORT")) {
                 if(portPattern.matcher(e.getValue()).matches()) {
-                    PORT = Integer.parseInt(e.getValue());
+                    port = true;
                 } else {
-                    PORT = Integer.parseInt(validatePort());
+                    break;
                 }
             } else if(e.getKey().equals("IP")) {
                 if(ipPattern.matcher(e.getValue()).matches()) {
-                    IP = e.getValue();
-                } else {
-                    IP = validateIP();
+                    ip = true;
                 }
-            } else {
-                System.out.println("Данные повреждены");
+            }
+        }
+        if (ip && port) {
+            ok = true;
+        }
+        return ok;
+    }
+
+    public void applyingConfigs(Map<String, String> configs) {
+        for(Map.Entry<String, String> e : configs.entrySet()) {
+            if (e.getKey().equals("PORT")) {
+                PORT = Integer.parseInt(e.getValue());
+            } else if(e.getKey().equals("IP")) {
+                IP = e.getValue();
             }
         }
     }
 
-    public boolean mainMenu(DataInputStream input, DataOutputStream output) throws IOException {
+    public boolean mainMenu(CloseableHttpClient client) throws IOException {
         while(true) {
             try {
             System.out.print("\n" + "Найти(1), добавить(2), удалить(3) данные или выйти(4)? ");
             int n = s.nextInt();
             switch (n) {
                 case (1):
-                    searchData(input, output);
+                    searchData(client);
                     break;
                 case (2):
-                    howToInputData(input, output);
+                    inputData(client);
                     break;
                 case (3):
-                    deleteUser(input, output);
+                    deleteUser(client);
                     break;
                 case (4):
-                    output.writeInt(4);
                     return true;
                 default:
                     System.out.println("\n" + "Команда не распознана. Повторте попытку!");
@@ -151,47 +182,19 @@ public class Client {
         }
     }
 
-    public void searchData(DataInputStream input, DataOutputStream output) throws IOException {
-        System.out.print("Введите фамилию с заглавной буквы: ");
-        String substring = s.next();
+    public void searchData(CloseableHttpClient client) throws IOException {
+        System.out.print("Введите искомое значение: ");
+        String substring = "?surname=" + new Scanner(System.in).next();
 
-        output.writeInt(1);
-        output.writeUTF(substring);
-
-        String sInput = input.readUTF();
-        if(sInput.equals("0")) {
-            System.out.println("\n" + "Ошибка на сервере. Попробуйте позже!");
-        } else if (sInput.equals("00")) {
-            System.out.println("В базе данных нет записей!");
-        } else {
-            ArrayList<User> res = catchDamagedData(sInput);
-            for(User u : res) {
-                System.out.println(printData(u));
-            }
+        HttpGet request = new HttpGet("http://localhost:5182/Servlet/" + substring);
+        request.addHeader("accept", "text/html");
+        HttpResponse response = client.execute(request);
+        BufferedReader rd = new BufferedReader (new InputStreamReader(response.getEntity().getContent()));
+        StringBuilder line = new StringBuilder();
+        while (rd.ready()) {
+            line.append("\n").append(rd.readLine());
         }
-    }
-
-    public ArrayList<User> catchDamagedData(String res) {
-        ArrayList<JsonNode> jsonArray;
-        try {
-            jsonArray = new ArrayList<>(Arrays.asList(mapper.readValue(res, JsonNode[].class)));
-        } catch (Exception e) {
-            System.out.println("База данных повреждена.");
-            return null;
-        }
-        if(jsonArray.isEmpty()){System.out.println("Запрашваемые данные не найдены.");}
-        ArrayList<User> userArray = new ArrayList<>();
-
-        for(JsonNode o: jsonArray) {
-            try {
-                User user = mapper.readValue(o.toString(), User.class);
-                df.parse(user.getBirth());
-                userArray.add(user);
-            } catch (Exception e) {
-                System.out.println("Невозможно вывести информацию, т.к. данные повреждены.");
-            }
-        }
-        return userArray;
+        System.out.println(line.toString());
     }
 
     public String printData(User user) {
@@ -203,13 +206,16 @@ public class Client {
                 "Birth date: " + user.getBirth();
     }
 
-    public void howToInputData(DataInputStream input, DataOutputStream output) throws IOException {
+    public void inputData(CloseableHttpClient client) throws IOException {
         User user;
         user = manualInput();
+        HttpPost post = new HttpPost("http://localhost:5182/Servlet/");
+        post.setEntity(new StringEntity(mapper.writeValueAsString(user)));
+        post.setHeader("Accept", "application/json");
+        post.setHeader("Content-type", "application/json");
 
-        output.writeInt(2);
-        output.writeUTF(mapper.writeValueAsString(user));
-        System.out.println("\n" + input.readUTF());
+        HttpResponse response = client.execute(post);
+        assert(response.getStatusLine().getStatusCode() == 200);
     }
 
     public User manualInput() {
@@ -253,23 +259,30 @@ public class Client {
         return checker;
     }
 
-    public void deleteUser(DataInputStream input, DataOutputStream output) throws IOException {
-        output.writeInt(3);
-        String array = input.readUTF();
-        if(array.equals("0")) {
+    public void deleteUser(CloseableHttpClient client) throws IOException {
+        HttpGet request = new HttpGet("http://localhost:5182/Servlet/");
+        request.addHeader("accept", "text/json");
+        HttpResponse response = client.execute(request);
+        BufferedReader rd = new BufferedReader (new InputStreamReader(response.getEntity().getContent()));
+        StringBuilder line = new StringBuilder();
+        while (rd.ready()) {
+            line.append("\n").append(rd.readLine());
+        }
+
+        if(line.toString().equals("0")) {
             System.out.println("\n" + "Ошибка на сервере. Повторите попытку позже");
             return;
-        } else if (array.equals("00")) {
+        } else if (line.toString().equals("00")) {
             System.out.println("\n" + "Записей в базе данных не обнаружено.");
             return;
         }
-        ArrayList<User> userArray = new ArrayList<>(Arrays.asList(mapper.readValue(array, User[].class)));
+        ArrayList<User> userArray = new ArrayList<>(Arrays.asList(mapper.readValue(line.toString(), User[].class)));
         for(User u: userArray) {
             System.out.println(printData(u));
         }
 
+        int id = 0;
         while (true) {
-            int id = 0;
             while(true) {
                 System.out.print("Введите id: ");
                 try {
@@ -282,13 +295,13 @@ public class Client {
             }
             final int finalId = id;
             if(userArray.removeIf(user -> user.getId() == finalId)) {
-                output.write(id);
                 break;
             } else {
                 System.out.println("Несуществующий id. Попробуйте ещё раз!");
             }
         }
 
-        System.out.println("Обновлённый список данных: " + input.readUTF());
+        HttpDelete delete = new HttpDelete("http://localhost:5182/Servlet/?id=" + id);
+        HttpResponse deleteResponse = client.execute(delete);
     }
 }
